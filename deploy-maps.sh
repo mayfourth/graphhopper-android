@@ -9,8 +9,5 @@ scp -P 2222 berlin.map root@$URL:$GH
 
 # wget http://download.geofabrik.de/osm/europe/germany/berlin.osm.bz2
 # bunzip2 berlin.osm.bz2
-# cd ../core/
-# ./run.sh ../android-example/berlin
-# mv graph-berlin.osm/ ../android-example/
-# cd ../android-example/
-scp -r -P 2222 graph-berlin.osm/ root@$URL:$GH
+# ./create-graph.sh /media/SAMSUNG/maps/berlin.osm
+scp -r -P 2222 graph-berlin/ root@$URL:$GH
