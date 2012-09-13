@@ -1,0 +1,9 @@
+target/
+*~
+*largeEWD.txt.gz
+TODO.txt
+gen/
+bin/
+*.map
+*.osm
+graph-*/
