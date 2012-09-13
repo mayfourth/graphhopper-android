@@ -35,7 +35,6 @@ import de.jetsli.graph.storage.Graph;
 import de.jetsli.graph.storage.Location2IDIndex;
 import de.jetsli.graph.storage.Location2IDQuadtree;
 import de.jetsli.graph.storage.MMapGraph;
-import de.jetsli.graph.storage.MemoryGraphSafe;
 import de.jetsli.graph.util.StopWatch;
 
 public class MainActivity extends MapActivity {
@@ -45,23 +44,36 @@ public class MainActivity extends MapActivity {
 	private Location2IDIndex locIndex;
 	private GeoPoint start;
 	// private static String area = "berlin";
-	private static String area = "oberfranken";
+//	private static String area = "oberfranken";
+	 private static String area = "bayern";
 	private static final String GRAPH_FOLDER = Environment.getExternalStorageDirectory()
 			.getAbsolutePath()
-			+ "/graphhopper/maps/graph-" + area + ".osm/";
+			+ "/graphhopper/maps/graph-" + area;
 	private static final String MAP_FILE = Environment.getExternalStorageDirectory()
 			.getAbsolutePath()
 			+ "/graphhopper/maps/" + area + ".map";
-	ListOverlay pathOverlay = new ListOverlay();
-	SimpleOnGestureListener listener = new SimpleOnGestureListener() {
+	private ListOverlay pathOverlay = new ListOverlay();
+	private volatile boolean prepareGraphInProgress = false;
+	private volatile boolean taskRunning = false;
+	private SimpleOnGestureListener listener = new SimpleOnGestureListener() {
 
+		// why does this fail? public boolean onDoubleTap(MotionEvent e) {};
 		public boolean onSingleTapConfirmed(MotionEvent motionEvent) {
+			if (!initGraph()) {				
+				return false;
+			}
+
+			if (taskRunning) {
+				logUserLong("Calculation still in progress");
+				return false;
+			}
 			float x = motionEvent.getX();
 			float y = motionEvent.getY();
 			Projection p = mapView.getProjection();
 			GeoPoint tmpPoint = p.fromPixels((int) x, (int) y);
 
 			if (start != null) {
+				taskRunning = true;
 				Marker marker = createMarker(tmpPoint, R.drawable.flag_red);
 				if (marker != null) {
 					pathOverlay.getOverlayItems().add(marker);
@@ -83,7 +95,7 @@ public class MainActivity extends MapActivity {
 			return true;
 		}
 	};
-	GestureDetector gestureDetector = new GestureDetector(listener);
+	private GestureDetector gestureDetector = new GestureDetector(listener);
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -110,30 +122,49 @@ public class MainActivity extends MapActivity {
 		mapView.getOverlays().add(pathOverlay);
 	}
 
-	Graph getGraph() {
-		if (graph == null) {
-			logUser("initial loading graph...");
-
-			// not thread safe but graph is only partially loaded into RAM
-			MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
-			g.loadExisting();
-			graph = g;
-
-			// fast and read-thread safe but requires the entire graph in RAM
-			// which fails for large areas (but e.g. the city Berlin is ok)
-			// graph = new MemoryGraphSafe(GRAPH_FOLDER);
-			log("found graph with " + g.getNodes() + " nodes");
+	private boolean initGraph() {
+		// only return true if index is created!
+		if (locIndex != null)
+			return true;
+		if (prepareGraphInProgress) {
+			logUserLong("Graph preparation still in progress");
+			return false;
 		}
+		prepareGraphInProgress = true;
+		logUser("initial loading of graph & index...");
+		new AsyncTask<Void, Void, Path>() {
+
+			protected Path doInBackground(Void... v) {
+				// not thread safe but graph is only partially loaded into RAM
+				MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
+				graph = g;
+				g.loadExisting();
+
+				// fast and read-thread safe but requires the entire graph in RAM
+				// which fails for large areas (but e.g. the city Berlin is ok)
+				// graph = new MemoryGraphSafe(GRAPH_FOLDER);
+				log("found graph with " + g.getNodes() + " nodes");
+
+				log("initial creating index ...");
+				// TODO Is this so slow on android because it needs to traverse the full graph?
+				locIndex = new Location2IDQuadtree(getGraph()).prepareIndex(1000);
+				log("finished creating index for graph");
+				return null;
+			}
+
+			protected void onPostExecute(Path o) {
+				logUserLong("Finished creating graph & index");
+				prepareGraphInProgress = false;
+			}
+		}.execute();
+		return false;
+	}
+
+	Graph getGraph() {
 		return graph;
 	}
 
 	Location2IDIndex getLocIndex() {
-		if (locIndex == null) {
-			Graph g = getGraph();			
-			log("creating index for graph");
-			// TODO why is this so slow on android?
-			locIndex = new Location2IDQuadtree(g).prepareIndex(1000);
-		}
 		return locIndex;
 	}
 
@@ -164,44 +195,40 @@ public class MainActivity extends MapActivity {
 		return new Marker(p, Marker.boundCenterBottom(drawable));
 	}
 
-	private volatile boolean taskRunning = false;
-
 	public void calcPath(final double fromLat, final double fromLon, final double toLat,
 			final double toLon) {
-		if (!taskRunning) {
-			taskRunning = true;
-			new AsyncTask<Void, Void, Path>() {
-				float locFindTime;
-				float time;
 
-				protected Path doInBackground(Void... v) {
-					StopWatch sw = new StopWatch().start();
-					log("query graph");
-					int fromId = getLocIndex().findID(fromLat, fromLon);
-					int toId = getLocIndex().findID(toLat, toLon);
-					locFindTime = sw.stop().getSeconds();
-					sw = new StopWatch().start();					
-					RoutingAlgorithm algo = new AStar(getGraph())
-							.setType(FastestCalc.DEFAULT);
-					logUser("calculating path ...");
-					Path p = algo.calcPath(fromId, toId);
-					time = sw.stop().getSeconds();
-					return p;
-				}
+		log("calculating path ...");
+		new AsyncTask<Void, Void, Path>() {
+			float locFindTime;
+			float time;
 
-				protected void onPostExecute(Path p) {
-					log("found path from:" + fromLat + "," + fromLon + " to " + toLat
-							+ "," + toLon + " with distance:" + p.distance()
-							+ ", locations:" + p.locations() + ", time:" + time
-							+ ", locFindTime:" + locFindTime);
-					logUserLong("the route is " + (float) p.distance() + "km long");
+			protected Path doInBackground(Void... v) {
+				StopWatch sw = new StopWatch().start();
+				log("query graph");
+				int fromId = getLocIndex().findID(fromLat, fromLon);
+				int toId = getLocIndex().findID(toLat, toLon);
+				locFindTime = sw.stop().getSeconds();
+				sw = new StopWatch().start();
+				RoutingAlgorithm algo = new AStar(getGraph())
+						.setType(FastestCalc.DEFAULT);
+				Path p = algo.calcPath(fromId, toId);
+				time = sw.stop().getSeconds();
+				return p;
+			}
 
-					pathOverlay.getOverlayItems().add(createPolyline(p));
-					mapView.redraw();
-					taskRunning = false;
-				}
-			}.execute();
-		}
+			protected void onPostExecute(Path p) {
+				log("found path from:" + fromLat + "," + fromLon + " to " + toLat + ","
+						+ toLon + " with distance:" + p.distance() + ", locations:"
+						+ p.locations() + ", time:" + time + ", locFindTime:"
+						+ locFindTime);
+				logUserLong("the route is " + (float) p.distance() + "km long");
+
+				pathOverlay.getOverlayItems().add(createPolyline(p));
+				mapView.redraw();
+				taskRunning = false;
+			}
+		}.execute();
 	}
 
 	private void log(String str) {

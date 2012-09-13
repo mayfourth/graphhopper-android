@@ -9,7 +9,7 @@ OSM=$1
 GRAPH=graph-$(basename "$OSM")
 GRAPH="${GRAPH%.*}"
 
-JAVA_OPTS_IMPORT="-XX:PermSize=20m -XX:MaxPermSize=20m -Xmx500m -Xms500m"
+JAVA_OPTS_IMPORT="-XX:PermSize=20m -XX:MaxPermSize=20m -Xmx1200m -Xms1200m"
 SIZE=5000000     
 GH_DIR=../graphhopper
 JAR=$GH_DIR/target/graphhopper-1.0-SNAPSHOT-jar-with-dependencies.jar
