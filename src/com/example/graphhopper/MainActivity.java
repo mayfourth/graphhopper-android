@@ -29,6 +29,7 @@ import android.view.Window;
 import android.widget.Toast;
 import de.jetsli.graph.routing.AStar;
 import de.jetsli.graph.routing.Path;
+import de.jetsli.graph.routing.RoutingAlgorithm;
 import de.jetsli.graph.routing.util.FastestCalc;
 import de.jetsli.graph.storage.Graph;
 import de.jetsli.graph.storage.Location2IDIndex;
@@ -66,7 +67,7 @@ public class MainActivity extends MapActivity {
 					pathOverlay.getOverlayItems().add(marker);
 					mapView.redraw();
 				}
-				logUser("calculating ...");
+
 				calcPath(start.latitude, start.longitude, tmpPoint.latitude,
 						tmpPoint.longitude);
 				start = null;
@@ -111,7 +112,7 @@ public class MainActivity extends MapActivity {
 
 	Graph getGraph() {
 		if (graph == null) {
-			log("loading graph");
+			logUser("initial loading graph...");
 
 			// not thread safe but graph is only partially loaded into RAM
 			MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
@@ -128,8 +129,9 @@ public class MainActivity extends MapActivity {
 
 	Location2IDIndex getLocIndex() {
 		if (locIndex == null) {
-			Graph g = getGraph();
+			Graph g = getGraph();			
 			log("creating index for graph");
+			// TODO why is this so slow on android?
 			locIndex = new Location2IDQuadtree(g).prepareIndex(1000);
 		}
 		return locIndex;
@@ -162,37 +164,44 @@ public class MainActivity extends MapActivity {
 		return new Marker(p, Marker.boundCenterBottom(drawable));
 	}
 
+	private volatile boolean taskRunning = false;
+
 	public void calcPath(final double fromLat, final double fromLon, final double toLat,
 			final double toLon) {
-		new AsyncTask<Void, Void, Path>() {
-			float locFindTime;
-			float time;
+		if (!taskRunning) {
+			taskRunning = true;
+			new AsyncTask<Void, Void, Path>() {
+				float locFindTime;
+				float time;
 
-			protected Path doInBackground(Void... v) {
-				StopWatch sw = new StopWatch().start();
-				log("query graph");
-				int fromId = getLocIndex().findID(fromLat, fromLon);
-				int toId = getLocIndex().findID(toLat, toLon);
-				locFindTime = sw.stop().getSeconds();
-				sw = new StopWatch().start();
-				log("calculate route");
-				Path p = new AStar(getGraph()).setType(FastestCalc.DEFAULT).calcPath(
-						fromId, toId);
-				time = sw.stop().getSeconds();
-				return p;
-			}
+				protected Path doInBackground(Void... v) {
+					StopWatch sw = new StopWatch().start();
+					log("query graph");
+					int fromId = getLocIndex().findID(fromLat, fromLon);
+					int toId = getLocIndex().findID(toLat, toLon);
+					locFindTime = sw.stop().getSeconds();
+					sw = new StopWatch().start();					
+					RoutingAlgorithm algo = new AStar(getGraph())
+							.setType(FastestCalc.DEFAULT);
+					logUser("calculating path ...");
+					Path p = algo.calcPath(fromId, toId);
+					time = sw.stop().getSeconds();
+					return p;
+				}
 
-			protected void onPostExecute(Path p) {
-				log("found path from:" + fromLat + "," + fromLon + " to " + toLat + ","
-						+ toLon + " with distance:" + p.distance() + ", locations:"
-						+ p.locations() + ", time:" + time + ", locFindTime:"
-						+ locFindTime);
-				logUserLong("the route is " + (float) p.distance() + "km long");
+				protected void onPostExecute(Path p) {
+					log("found path from:" + fromLat + "," + fromLon + " to " + toLat
+							+ "," + toLon + " with distance:" + p.distance()
+							+ ", locations:" + p.locations() + ", time:" + time
+							+ ", locFindTime:" + locFindTime);
+					logUserLong("the route is " + (float) p.distance() + "km long");
 
-				pathOverlay.getOverlayItems().add(createPolyline(p));
-				mapView.redraw();
-			}
-		}.execute();
+					pathOverlay.getOverlayItems().add(createPolyline(p));
+					mapView.redraw();
+					taskRunning = false;
+				}
+			}.execute();
+		}
 	}
 
 	private void log(String str) {
