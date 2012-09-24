@@ -7,3 +7,5 @@ bin/
 *.map
 *.osm
 graph-*/
+*-gh/
+loc2idIndex/

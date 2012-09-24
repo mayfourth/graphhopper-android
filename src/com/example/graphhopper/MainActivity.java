@@ -33,7 +33,9 @@ import de.jetsli.graph.routing.RoutingAlgorithm;
 import de.jetsli.graph.routing.util.FastestCalc;
 import de.jetsli.graph.storage.Graph;
 import de.jetsli.graph.storage.Location2IDIndex;
+import de.jetsli.graph.storage.Location2IDPreciseIndex;
 import de.jetsli.graph.storage.Location2IDQuadtree;
+import de.jetsli.graph.storage.MMapDirectory;
 import de.jetsli.graph.storage.MMapGraph;
 import de.jetsli.graph.util.StopWatch;
 
@@ -41,14 +43,14 @@ public class MainActivity extends MapActivity {
 
 	private MapView mapView;
 	private Graph graph;
-	private Location2IDIndex locIndex;
+	private Location2IDQuadtree locIndex;
 	private GeoPoint start;
 	// private static String area = "berlin";
-//	private static String area = "oberfranken";
-	 private static String area = "bayern";
+	// private static String area = "oberfranken";
+	private static String area = "bayern";
 	private static final String GRAPH_FOLDER = Environment.getExternalStorageDirectory()
 			.getAbsolutePath()
-			+ "/graphhopper/maps/graph-" + area;
+			+ "/graphhopper/maps/" + area + "-gh/";
 	private static final String MAP_FILE = Environment.getExternalStorageDirectory()
 			.getAbsolutePath()
 			+ "/graphhopper/maps/" + area + ".map";
@@ -59,7 +61,7 @@ public class MainActivity extends MapActivity {
 
 		// why does this fail? public boolean onDoubleTap(MotionEvent e) {};
 		public boolean onSingleTapConfirmed(MotionEvent motionEvent) {
-			if (!initGraph()) {				
+			if (!initGraph()) {
 				return false;
 			}
 
@@ -131,29 +133,48 @@ public class MainActivity extends MapActivity {
 			return false;
 		}
 		prepareGraphInProgress = true;
-		logUser("initial loading of graph & index...");
+		logUserLong("initial loading of graph & index...");
 		new AsyncTask<Void, Void, Path>() {
 
+			Throwable error;
+
 			protected Path doInBackground(Void... v) {
-				// not thread safe but graph is only partially loaded into RAM
-				MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
-				graph = g;
-				g.loadExisting();
+				try {
+					// not thread safe but graph is only partially loaded into RAM
+					MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
+					graph = g;
+					if (!g.loadExisting()) {
+						error = new IllegalStateException("Couldn't load graph!?");
+						return null;
+					}
 
-				// fast and read-thread safe but requires the entire graph in RAM
-				// which fails for large areas (but e.g. the city Berlin is ok)
-				// graph = new MemoryGraphSafe(GRAPH_FOLDER);
-				log("found graph with " + g.getNodes() + " nodes");
+					// MemoryGraphSafe is fast and read-thread safe but requires the entire graph in
+					// RAM which fails for large areas (but e.g. the city Berlin it is ok)
+					// graph = new MemoryGraphSafe(GRAPH_FOLDER);
+					log("found graph with " + g.getNodes() + " nodes");
 
-				log("initial creating index ...");
-				// TODO Is this so slow on android because it needs to traverse the full graph?
-				locIndex = new Location2IDQuadtree(getGraph()).prepareIndex(1000);
-				log("finished creating index for graph");
+					log("initial creating index ...");
+					
+					locIndex = new Location2IDQuadtree(getGraph(), new MMapDirectory(
+							GRAPH_FOLDER));
+					if (!locIndex.loadExisting())
+						error = new IllegalStateException(
+								"Couldn't load location2id index from graph folder");
+					else
+						// locIndex = Location2IDPreciseIndex.load(g, GRAPH_FOLDER + "/idIndex");
+						log("finished creating index for graph");
+				} catch (Throwable t) {
+					error = t;
+				}
 				return null;
 			}
 
 			protected void onPostExecute(Path o) {
-				logUserLong("Finished creating graph & index");
+				if (error == null)
+					logUserLong("Finished loading graph & index");
+				else
+					logUserLong("An error happend while creating graph & index:"
+							+ error.getMessage());
 				prepareGraphInProgress = false;
 			}
 		}.execute();
