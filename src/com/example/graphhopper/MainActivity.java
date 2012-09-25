@@ -14,16 +14,20 @@ import org.mapsforge.android.maps.overlay.Polyline;
 import org.mapsforge.core.model.GeoPoint;
 import org.mapsforge.map.reader.header.FileOpenResult;
 
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.GestureDetector.SimpleOnGestureListener;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.Window;
 import android.widget.Toast;
@@ -33,7 +37,6 @@ import de.jetsli.graph.routing.RoutingAlgorithm;
 import de.jetsli.graph.routing.util.FastestCalc;
 import de.jetsli.graph.storage.Graph;
 import de.jetsli.graph.storage.Location2IDIndex;
-import de.jetsli.graph.storage.Location2IDPreciseIndex;
 import de.jetsli.graph.storage.Location2IDQuadtree;
 import de.jetsli.graph.storage.MMapDirectory;
 import de.jetsli.graph.storage.MMapGraph;
@@ -45,6 +48,7 @@ public class MainActivity extends MapActivity {
 	private Graph graph;
 	private Location2IDQuadtree locIndex;
 	private GeoPoint start;
+	private GeoPoint end;
 	// private static String area = "berlin";
 	// private static String area = "oberfranken";
 	private static String area = "bayern";
@@ -66,7 +70,7 @@ public class MainActivity extends MapActivity {
 			}
 
 			if (taskRunning) {
-				logUserLong("Calculation still in progress");
+				logUser("Calculation still in progress");
 				return false;
 			}
 			float x = motionEvent.getX();
@@ -74,7 +78,8 @@ public class MainActivity extends MapActivity {
 			Projection p = mapView.getProjection();
 			GeoPoint tmpPoint = p.fromPixels((int) x, (int) y);
 
-			if (start != null) {
+			if (start != null && end == null) {
+				end = tmpPoint;
 				taskRunning = true;
 				Marker marker = createMarker(tmpPoint, R.drawable.flag_red);
 				if (marker != null) {
@@ -82,11 +87,10 @@ public class MainActivity extends MapActivity {
 					mapView.redraw();
 				}
 
-				calcPath(start.latitude, start.longitude, tmpPoint.latitude,
-						tmpPoint.longitude);
-				start = null;
+				calcPath(start.latitude, start.longitude, end.latitude, end.longitude);
 			} else {
 				start = tmpPoint;
+				end = null;
 				pathOverlay.getOverlayItems().clear();
 				Marker marker = createMarker(start, R.drawable.flag_green);
 				if (marker != null) {
@@ -116,7 +120,7 @@ public class MainActivity extends MapActivity {
 		mapView.setBuiltInZoomControls(true);
 		FileOpenResult fileOpenResult = mapView.setMapFile(new File(MAP_FILE));
 		if (!fileOpenResult.isSuccess()) {
-			logUserLong(fileOpenResult.getErrorMessage());
+			logUser(fileOpenResult.getErrorMessage());
 			finish();
 		}
 		setContentView(mapView);
@@ -129,11 +133,11 @@ public class MainActivity extends MapActivity {
 		if (locIndex != null)
 			return true;
 		if (prepareGraphInProgress) {
-			logUserLong("Graph preparation still in progress");
+			logUser("Graph preparation still in progress");
 			return false;
 		}
 		prepareGraphInProgress = true;
-		logUserLong("initial loading of graph & index...");
+		logUser("initial loading of graph & index...");
 		new AsyncTask<Void, Void, Path>() {
 
 			Throwable error;
@@ -154,7 +158,6 @@ public class MainActivity extends MapActivity {
 					log("found graph with " + g.getNodes() + " nodes");
 
 					log("initial creating index ...");
-					
 					locIndex = new Location2IDQuadtree(getGraph(), new MMapDirectory(
 							GRAPH_FOLDER));
 					if (!locIndex.loadExisting())
@@ -171,9 +174,9 @@ public class MainActivity extends MapActivity {
 
 			protected void onPostExecute(Path o) {
 				if (error == null)
-					logUserLong("Finished loading graph & index");
+					logUser("Finished loading graph & index");
 				else
-					logUserLong("An error happend while creating graph & index:"
+					logUser("An error happend while creating graph & index:"
 							+ error.getMessage());
 				prepareGraphInProgress = false;
 			}
@@ -230,9 +233,9 @@ public class MainActivity extends MapActivity {
 				int fromId = getLocIndex().findID(fromLat, fromLon);
 				int toId = getLocIndex().findID(toLat, toLon);
 				locFindTime = sw.stop().getSeconds();
-				sw = new StopWatch().start();
-				RoutingAlgorithm algo = new AStar(getGraph())
-						.setType(FastestCalc.DEFAULT);
+				sw = new StopWatch().start();				
+				RoutingAlgorithm algo = new AStar(getGraph())//.setApproximation(false)
+				.setType(FastestCalc.DEFAULT);
 				Path p = algo.calcPath(fromId, toId);
 				time = sw.stop().getSeconds();
 				return p;
@@ -243,7 +246,7 @@ public class MainActivity extends MapActivity {
 						+ toLon + " with distance:" + p.distance() + ", locations:"
 						+ p.locations() + ", time:" + time + ", locFindTime:"
 						+ locFindTime);
-				logUserLong("the route is " + (float) p.distance() + "km long");
+				logUser("the route is " + (float) p.distance() + "km long");
 
 				pathOverlay.getOverlayItems().add(createPolyline(p));
 				mapView.redraw();
@@ -257,10 +260,35 @@ public class MainActivity extends MapActivity {
 	}
 
 	private void logUser(String str) {
-		Toast.makeText(this, str, Toast.LENGTH_SHORT).show();
+		Toast.makeText(this, str, Toast.LENGTH_LONG).show();
 	}
 
-	private void logUserLong(String str) {
-		Toast.makeText(this, str, Toast.LENGTH_LONG).show();
+	private static final int NEW_MENU_ID = Menu.FIRST + 1;
+
+	@Override
+	public boolean onCreateOptionsMenu(Menu menu) {
+		super.onCreateOptionsMenu(menu);
+		menu.add(0, NEW_MENU_ID, 0, "Google");
+		// menu.add(0, NEW_MENU_ID + 1, 0, "Other");
+		return true;
+	}
+
+	public boolean onOptionsItemSelected(MenuItem item) {
+		switch (item.getItemId()) {
+		case NEW_MENU_ID:
+			if (start == null || end == null) {
+				logUser("tap screen to set start and end of route");
+				break;
+			}
+			Intent intent = new Intent(Intent.ACTION_VIEW);
+			// get rid of the dialog
+			intent.setClassName("com.google.android.apps.maps", "com.google.android.maps.MapsActivity");
+			intent.setData(Uri.parse("http://maps.google.com/maps?saddr="
+					+ start.latitude + "," + start.longitude + "&daddr=" + end.latitude
+					+ "," + end.longitude));
+			startActivity(intent);
+			break;
+		}
+		return true;
 	}
 }
