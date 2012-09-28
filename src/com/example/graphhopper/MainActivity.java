@@ -35,11 +35,12 @@ import de.jetsli.graph.routing.AStar;
 import de.jetsli.graph.routing.Path;
 import de.jetsli.graph.routing.RoutingAlgorithm;
 import de.jetsli.graph.routing.util.FastestCalc;
+import de.jetsli.graph.storage.Directory;
 import de.jetsli.graph.storage.Graph;
+import de.jetsli.graph.storage.GraphStorage;
 import de.jetsli.graph.storage.Location2IDIndex;
 import de.jetsli.graph.storage.Location2IDQuadtree;
-import de.jetsli.graph.storage.MMapDirectory;
-import de.jetsli.graph.storage.MMapGraph;
+import de.jetsli.graph.storage.RAMDirectory;
 import de.jetsli.graph.util.StopWatch;
 
 public class MainActivity extends MapActivity {
@@ -49,9 +50,9 @@ public class MainActivity extends MapActivity {
 	private Location2IDQuadtree locIndex;
 	private GeoPoint start;
 	private GeoPoint end;
-	// private static String area = "berlin";
+	private static String area = "berlin";
 	// private static String area = "oberfranken";
-	private static String area = "bayern";
+	// private static String area = "bayern";
 	private static final String GRAPH_FOLDER = Environment.getExternalStorageDirectory()
 			.getAbsolutePath()
 			+ "/graphhopper/maps/" + area + "-gh/";
@@ -144,22 +145,32 @@ public class MainActivity extends MapActivity {
 
 			protected Path doInBackground(Void... v) {
 				try {
-					// not thread safe but graph is only partially loaded into RAM
-					MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
-					graph = g;
-					if (!g.loadExisting()) {
-						error = new IllegalStateException("Couldn't load graph!?");
-						return null;
-					}
+					// not thread safe, and slow but graph is only partially loaded into RAM
+					// MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
 
 					// MemoryGraphSafe is fast and read-thread safe but requires the entire graph in
 					// RAM which fails for large areas (but e.g. the city Berlin it is ok)
-					// graph = new MemoryGraphSafe(GRAPH_FOLDER);
+					// MemoryGraphSafe g = new MemoryGraphSafe(GRAPH_FOLDER);
+
+					// Our new Graph implementation!
+					// Switch memory mapped and in-memory via directory. Both have a compatible file
+					// format.
+					// Directory dir = new MMapDirectory(GRAPH_FOLDER); <- slow!
+					Directory dir = new RAMDirectory(GRAPH_FOLDER, true);
+					GraphStorage g = new GraphStorage(dir);
+					graph = g;
+					if (!g.loadExisting()) {
+						// TODO creating and populating via OSMReader is currently not possible on
+						// android
+						// g.createNew(nodeCount);
+						error = new IllegalStateException(
+								"Couldn't load graph! see deploy-maps.sh and create-graph.sh if you need one");
+						return null;
+					}
 					log("found graph with " + g.getNodes() + " nodes");
 
 					log("initial creating index ...");
-					locIndex = new Location2IDQuadtree(getGraph(), new MMapDirectory(
-							GRAPH_FOLDER));
+					locIndex = new Location2IDQuadtree(getGraph(), dir);
 					if (!locIndex.loadExisting())
 						error = new IllegalStateException(
 								"Couldn't load location2id index from graph folder");
@@ -233,9 +244,12 @@ public class MainActivity extends MapActivity {
 				int fromId = getLocIndex().findID(fromLat, fromLon);
 				int toId = getLocIndex().findID(toLat, toLon);
 				locFindTime = sw.stop().getSeconds();
-				sw = new StopWatch().start();				
-				RoutingAlgorithm algo = new AStar(getGraph())//.setApproximation(false)
-				.setType(FastestCalc.DEFAULT);
+				sw = new StopWatch().start();
+				RoutingAlgorithm algo = new AStar(getGraph())
+				// slower but uses less mem: .setUseHelperMap(false)
+						.setType(FastestCalc.DEFAULT);
+				// RoutingAlgorithm algo = new DijkstraBidirection(getGraph())
+				// .setType(FastestCalc.DEFAULT);
 				Path p = algo.calcPath(fromId, toId);
 				time = sw.stop().getSeconds();
 				return p;
@@ -282,7 +296,8 @@ public class MainActivity extends MapActivity {
 			}
 			Intent intent = new Intent(Intent.ACTION_VIEW);
 			// get rid of the dialog
-			intent.setClassName("com.google.android.apps.maps", "com.google.android.maps.MapsActivity");
+			intent.setClassName("com.google.android.apps.maps",
+					"com.google.android.maps.MapsActivity");
 			intent.setData(Uri.parse("http://maps.google.com/maps?saddr="
 					+ start.latitude + "," + start.longitude + "&daddr=" + end.latitude
 					+ "," + end.longitude));
