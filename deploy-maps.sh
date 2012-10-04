@@ -1,3 +1,6 @@
+# either plugin your device and copy the files via USB-detected-device or use the following method
+# when starting an ssh server like sshdroid
+
 URL=192.168.0.102
 GH=/sdcard/graphhopper/maps/
 

@@ -10,7 +10,9 @@ GRAPH=$(basename "$OSM")
 GRAPH="${GRAPH%.*}"-gh
 
 JAVA_OPTS_IMPORT="-XX:PermSize=20m -XX:MaxPermSize=20m -Xmx1200m -Xms1200m"
-SIZE=5000000     
+SIZE=5000000
+
+# use desktop version where logging is still contained
 GH_JAR_DIR=../graphhopper
 JAR=$GH_JAR_DIR/target/graphhopper-1.0-SNAPSHOT-jar-with-dependencies.jar
 
@@ -31,7 +33,7 @@ fi
 #if [ ! -d "$GRAPH" ]; then
   echo "## now creating graph $GRAPH from $OSM,  java opts=$JAVA_OPTS_IMPORT"
   echo "## HINT: put the osm on an external usb drive which should speed up import time"
-  $JAVA_HOME/bin/java $JAVA_OPTS_IMPORT -cp $JAR de.jetsli.graph.reader.OSMReader graph=$GRAPH osm=$OSM size=$SIZE dataaccess=mmap
+  $JAVA_HOME/bin/java $JAVA_OPTS_IMPORT -cp $JAR com.graphhopper.reader.OSMReader graph=$GRAPH osm=$OSM size=$SIZE dataaccess=mmap
 #else
 #  echo "## graph already exists at $GRAPH"
 #fi

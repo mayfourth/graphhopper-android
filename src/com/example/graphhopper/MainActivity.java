@@ -31,17 +31,23 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.Window;
 import android.widget.Toast;
-import de.jetsli.graph.routing.AStar;
-import de.jetsli.graph.routing.Path;
-import de.jetsli.graph.routing.RoutingAlgorithm;
-import de.jetsli.graph.routing.util.FastestCalc;
-import de.jetsli.graph.storage.Directory;
-import de.jetsli.graph.storage.Graph;
-import de.jetsli.graph.storage.GraphStorage;
-import de.jetsli.graph.storage.Location2IDIndex;
-import de.jetsli.graph.storage.Location2IDQuadtree;
-import de.jetsli.graph.storage.RAMDirectory;
-import de.jetsli.graph.util.StopWatch;
+
+import com.graphhopper.routing.AStar;
+import com.graphhopper.routing.AStarBidirection;
+import com.graphhopper.routing.Path;
+import com.graphhopper.routing.PathBidirRef;
+import com.graphhopper.routing.PathPrio;
+import com.graphhopper.routing.RoutingAlgorithm;
+import com.graphhopper.routing.util.EdgePrioFilter;
+import com.graphhopper.routing.util.FastestCalc;
+import com.graphhopper.storage.Directory;
+import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.GraphStorage;
+import com.graphhopper.storage.Location2IDIndex;
+import com.graphhopper.storage.Location2IDQuadtree;
+import com.graphhopper.storage.PriorityGraph;
+import com.graphhopper.storage.RAMDirectory;
+import com.graphhopper.util.StopWatch;
 
 public class MainActivity extends MapActivity {
 
@@ -155,7 +161,9 @@ public class MainActivity extends MapActivity {
 					// Our new Graph implementation!
 					// Switch memory mapped and in-memory via directory. Both have a compatible file
 					// format.
-					// Directory dir = new MMapDirectory(GRAPH_FOLDER); <- slow!
+
+					// be sure you are using this for PriorityGraphStorage and its algorithms only
+					// Directory dir = new MMapDirectory(GRAPH_FOLDER);
 					Directory dir = new RAMDirectory(GRAPH_FOLDER, true);
 					GraphStorage g = new GraphStorage(dir);
 					graph = g;
@@ -245,14 +253,38 @@ public class MainActivity extends MapActivity {
 				int toId = getLocIndex().findID(toLat, toLon);
 				locFindTime = sw.stop().getSeconds();
 				sw = new StopWatch().start();
-				RoutingAlgorithm algo = new AStar(getGraph())
-				// slower but uses less mem: .setUseHelperMap(false)
-						.setType(FastestCalc.DEFAULT);
-				// RoutingAlgorithm algo = new DijkstraBidirection(getGraph())
-				// .setType(FastestCalc.DEFAULT);
+				RoutingAlgorithm algo = createAlgo();
 				Path p = algo.calcPath(fromId, toId);
 				time = sw.stop().getSeconds();
 				return p;
+			}
+
+			RoutingAlgorithm createAlgo() {
+				AStar algo = new AStar(getGraph()).setApproximation(true);
+				algo.setType(FastestCalc.DEFAULT);
+				// slower but uses less mem: .setUseHelperMap(false)
+
+				// RoutingAlgorithm algo = new DijkstraBidirection(getGraph())
+				// .setType(FastestCalc.DEFAULT);
+				return algo;
+			}
+
+			RoutingAlgorithm createAlgoPrio() {
+				AStarBidirection algo = new AStarBidirection(graph) {
+					@Override
+					public String toString() {
+						return "AStarBidirection|Shortcut|" + weightCalc;
+					}
+
+					@Override
+					protected PathBidirRef createPath() {
+						// expand skipped nodes
+						return new PathPrio((PriorityGraph) graph, weightCalc);
+					}
+				}.setApproximation(true);
+				algo.setType(FastestCalc.DEFAULT);
+				algo.setEdgeFilter(new EdgePrioFilter((PriorityGraph) graph));
+				return algo;
 			}
 
 			protected void onPostExecute(Path p) {
