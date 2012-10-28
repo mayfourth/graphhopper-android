@@ -14,6 +14,8 @@ import org.mapsforge.android.maps.overlay.Polyline;
 import org.mapsforge.core.model.GeoPoint;
 import org.mapsforge.map.reader.header.FileOpenResult;
 
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
@@ -30,23 +32,20 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.Window;
+import android.widget.EditText;
 import android.widget.Toast;
 
-import com.graphhopper.routing.AStar;
-import com.graphhopper.routing.AStarBidirection;
 import com.graphhopper.routing.Path;
-import com.graphhopper.routing.PathBidirRef;
-import com.graphhopper.routing.PathPrio;
 import com.graphhopper.routing.RoutingAlgorithm;
-import com.graphhopper.routing.util.EdgePrioFilter;
 import com.graphhopper.routing.util.FastestCalc;
+import com.graphhopper.routing.util.PrepareContractionHierarchies;
 import com.graphhopper.storage.Directory;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.GraphStorage;
+import com.graphhopper.storage.LevelGraphStorage;
 import com.graphhopper.storage.Location2IDIndex;
 import com.graphhopper.storage.Location2IDQuadtree;
-import com.graphhopper.storage.PriorityGraph;
-import com.graphhopper.storage.RAMDirectory;
+import com.graphhopper.storage.MMapDirectory;
 import com.graphhopper.util.StopWatch;
 
 public class MainActivity extends MapActivity {
@@ -56,18 +55,12 @@ public class MainActivity extends MapActivity {
 	private Location2IDQuadtree locIndex;
 	private GeoPoint start;
 	private GeoPoint end;
-	private static String area = "berlin";
-	// private static String area = "oberfranken";
-	// private static String area = "bayern";
-	private static final String GRAPH_FOLDER = Environment.getExternalStorageDirectory()
-			.getAbsolutePath()
-			+ "/graphhopper/maps/" + area + "-gh/";
-	private static final String MAP_FILE = Environment.getExternalStorageDirectory()
-			.getAbsolutePath()
-			+ "/graphhopper/maps/" + area + ".map";
 	private ListOverlay pathOverlay = new ListOverlay();
 	private volatile boolean prepareGraphInProgress = false;
-	private volatile boolean taskRunning = false;
+	private volatile boolean shortestPathRunning = false;
+	private String currentArea = "berlin";
+	private static String GRAPH_FOLDER;
+	private static String MAP_FILE;
 	private SimpleOnGestureListener listener = new SimpleOnGestureListener() {
 
 		// why does this fail? public boolean onDoubleTap(MotionEvent e) {};
@@ -76,7 +69,7 @@ public class MainActivity extends MapActivity {
 				return false;
 			}
 
-			if (taskRunning) {
+			if (shortestPathRunning) {
 				logUser("Calculation still in progress");
 				return false;
 			}
@@ -87,7 +80,7 @@ public class MainActivity extends MapActivity {
 
 			if (start != null && end == null) {
 				end = tmpPoint;
-				taskRunning = true;
+				shortestPathRunning = true;
 				Marker marker = createMarker(tmpPoint, R.drawable.flag_red);
 				if (marker != null) {
 					pathOverlay.getOverlayItems().add(marker);
@@ -125,14 +118,43 @@ public class MainActivity extends MapActivity {
 		};
 		mapView.setClickable(true);
 		mapView.setBuiltInZoomControls(true);
+		
+		final EditText input = new EditText(this);
+		input.setText(currentArea);
+		new AlertDialog.Builder(this).setTitle("Routing area").setMessage("On which area you want to route?")
+				.setView(input).setPositiveButton("Ok",
+						new DialogInterface.OnClickListener() {
+							public void onClick(DialogInterface dialog, int whichButton) {
+								initFiles(input.getText().toString());
+							}
+						}).setNegativeButton("Cancel",
+						new DialogInterface.OnClickListener() {
+							public void onClick(DialogInterface dialog, int whichButton) {
+								initFiles(currentArea);
+							}
+						}).show();
+	}
+
+	private void initFiles(String area) {
+		if (MAP_FILE != null && currentArea.equals(area))
+			return;
+		currentArea = area;
+		MAP_FILE = Environment.getExternalStorageDirectory().getAbsolutePath()
+				+ "/graphhopper/maps/" + area + ".map";
+		GRAPH_FOLDER = Environment.getExternalStorageDirectory().getAbsolutePath()
+				+ "/graphhopper/maps/" + area + "-gh/";
+
 		FileOpenResult fileOpenResult = mapView.setMapFile(new File(MAP_FILE));
 		if (!fileOpenResult.isSuccess()) {
 			logUser(fileOpenResult.getErrorMessage());
 			finish();
 		}
 		setContentView(mapView);
-
+		mapView.getOverlays().clear();
 		mapView.getOverlays().add(pathOverlay);
+
+		locIndex = null;
+		initGraph();
 	}
 
 	private boolean initGraph() {
@@ -163,9 +185,9 @@ public class MainActivity extends MapActivity {
 					// format.
 
 					// be sure you are using this for PriorityGraphStorage and its algorithms only
-					// Directory dir = new MMapDirectory(GRAPH_FOLDER);
-					Directory dir = new RAMDirectory(GRAPH_FOLDER, true);
-					GraphStorage g = new GraphStorage(dir);
+					Directory dir = new MMapDirectory(GRAPH_FOLDER);
+					// Directory dir = new RAMDirectory(GRAPH_FOLDER, true);
+					GraphStorage g = new LevelGraphStorage(dir);
 					graph = g;
 					if (!g.loadExisting()) {
 						// TODO creating and populating via OSMReader is currently not possible on
@@ -212,7 +234,7 @@ public class MainActivity extends MapActivity {
 	}
 
 	private Polyline createPolyline(Path p) {
-		int locs = p.locations();
+		int locs = p.nodes();
 		List<GeoPoint> geoPoints = new ArrayList<GeoPoint>(locs);
 		for (int i = 0; i < locs; i++) {
 			geoPoints.add(toGeoPoint(p, i));
@@ -229,7 +251,7 @@ public class MainActivity extends MapActivity {
 	}
 
 	private GeoPoint toGeoPoint(Path p, int i) {
-		int index = p.location(i);
+		int index = p.node(i);
 		return new GeoPoint(getGraph().getLatitude(index), getGraph().getLongitude(index));
 	}
 
@@ -259,44 +281,30 @@ public class MainActivity extends MapActivity {
 				return p;
 			}
 
+			// RoutingAlgorithm createAlgoOld() {
+			// AStar algo = new AStar(getGraph()).setApproximation(true);
+			// algo.setType(FastestCalc.DEFAULT);
+			// // slower but uses less mem: .setUseHelperMap(false)
+			//
+			// // RoutingAlgorithm algo = new DijkstraBidirection(getGraph())
+			// // .setType(FastestCalc.DEFAULT);
+			// return algo;
+			// }
+
 			RoutingAlgorithm createAlgo() {
-				AStar algo = new AStar(getGraph()).setApproximation(true);
-				algo.setType(FastestCalc.DEFAULT);
-				// slower but uses less mem: .setUseHelperMap(false)
-
-				// RoutingAlgorithm algo = new DijkstraBidirection(getGraph())
-				// .setType(FastestCalc.DEFAULT);
-				return algo;
-			}
-
-			RoutingAlgorithm createAlgoPrio() {
-				AStarBidirection algo = new AStarBidirection(graph) {
-					@Override
-					public String toString() {
-						return "AStarBidirection|Shortcut|" + weightCalc;
-					}
-
-					@Override
-					protected PathBidirRef createPath() {
-						// expand skipped nodes
-						return new PathPrio((PriorityGraph) graph, weightCalc);
-					}
-				}.setApproximation(true);
-				algo.setType(FastestCalc.DEFAULT);
-				algo.setEdgeFilter(new EdgePrioFilter((PriorityGraph) graph));
-				return algo;
+				return new PrepareContractionHierarchies().setGraph(graph)
+						.setType(FastestCalc.DEFAULT).createAlgo();
 			}
 
 			protected void onPostExecute(Path p) {
 				log("found path from:" + fromLat + "," + fromLon + " to " + toLat + ","
-						+ toLon + " with distance:" + p.distance() + ", locations:"
-						+ p.locations() + ", time:" + time + ", locFindTime:"
-						+ locFindTime);
+						+ toLon + " with distance:" + p.distance() + ", nodes:"
+						+ p.nodes() + ", time:" + time + ", locFindTime:" + locFindTime);
 				logUser("the route is " + (float) p.distance() + "km long");
 
 				pathOverlay.getOverlayItems().add(createPolyline(p));
 				mapView.redraw();
-				taskRunning = false;
+				shortestPathRunning = false;
 			}
 		}.execute();
 	}
