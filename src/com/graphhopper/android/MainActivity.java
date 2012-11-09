@@ -137,7 +137,7 @@ public class MainActivity extends MapActivity {
 	}
 
 	private void initFiles(String area) {
-		if (MAP_FILE != null && currentArea.equals(area))
+		if (graph != null && locIndex != null && currentArea.equals(area))
 			return;
 		currentArea = area;
 		MAP_FILE = Environment.getExternalStorageDirectory().getAbsolutePath()
