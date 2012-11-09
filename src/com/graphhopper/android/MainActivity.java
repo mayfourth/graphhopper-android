@@ -1,4 +1,4 @@
-package com.example.graphhopper;
+package com.graphhopper.android;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -35,10 +35,11 @@ import android.view.Window;
 import android.widget.EditText;
 import android.widget.Toast;
 
+import com.graphhopper.android.R;
 import com.graphhopper.routing.Path;
 import com.graphhopper.routing.RoutingAlgorithm;
-import com.graphhopper.routing.util.FastestCalc;
-import com.graphhopper.routing.util.PrepareContractionHierarchies;
+import com.graphhopper.routing.ch.PrepareContractionHierarchies;
+import com.graphhopper.routing.util.FastestCarCalc;
 import com.graphhopper.storage.Directory;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.GraphStorage;
@@ -46,6 +47,7 @@ import com.graphhopper.storage.LevelGraphStorage;
 import com.graphhopper.storage.Location2IDIndex;
 import com.graphhopper.storage.Location2IDQuadtree;
 import com.graphhopper.storage.MMapDirectory;
+import com.graphhopper.util.Helper;
 import com.graphhopper.util.StopWatch;
 
 public class MainActivity extends MapActivity {
@@ -118,21 +120,20 @@ public class MainActivity extends MapActivity {
 		};
 		mapView.setClickable(true);
 		mapView.setBuiltInZoomControls(true);
-		
+
 		final EditText input = new EditText(this);
 		input.setText(currentArea);
-		new AlertDialog.Builder(this).setTitle("Routing area").setMessage("On which area you want to route?")
-				.setView(input).setPositiveButton("Ok",
-						new DialogInterface.OnClickListener() {
-							public void onClick(DialogInterface dialog, int whichButton) {
-								initFiles(input.getText().toString());
-							}
-						}).setNegativeButton("Cancel",
-						new DialogInterface.OnClickListener() {
-							public void onClick(DialogInterface dialog, int whichButton) {
-								initFiles(currentArea);
-							}
-						}).show();
+		new AlertDialog.Builder(this).setTitle("Routing area").setMessage(
+				"On which area you want to route?").setView(input).setPositiveButton(
+				"Ok", new DialogInterface.OnClickListener() {
+					public void onClick(DialogInterface dialog, int whichButton) {
+						initFiles(input.getText().toString());
+					}
+				}).setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+			public void onClick(DialogInterface dialog, int whichButton) {
+				initFiles(currentArea);
+			}
+		}).show();
 	}
 
 	private void initFiles(String area) {
@@ -142,12 +143,13 @@ public class MainActivity extends MapActivity {
 		MAP_FILE = Environment.getExternalStorageDirectory().getAbsolutePath()
 				+ "/graphhopper/maps/" + area + ".map";
 		GRAPH_FOLDER = Environment.getExternalStorageDirectory().getAbsolutePath()
-				+ "/graphhopper/maps/" + area + "-gh/";
+				+ "/graphhopper/maps/" + area;
 
 		FileOpenResult fileOpenResult = mapView.setMapFile(new File(MAP_FILE));
 		if (!fileOpenResult.isSuccess()) {
 			logUser(fileOpenResult.getErrorMessage());
 			finish();
+			return;
 		}
 		setContentView(mapView);
 		mapView.getOverlays().clear();
@@ -166,39 +168,37 @@ public class MainActivity extends MapActivity {
 			return false;
 		}
 		prepareGraphInProgress = true;
-		logUser("initial loading of graph & index...");
+		logUser("loading graph (" + Helper.VERSION + ") ... ");
 		new AsyncTask<Void, Void, Path>() {
 
 			Throwable error;
 
 			protected Path doInBackground(Void... v) {
 				try {
-					// not thread safe, and slow but graph is only partially loaded into RAM
-					// MMapGraph g = new MMapGraph(GRAPH_FOLDER, 10);
+					File compressed = new File(GRAPH_FOLDER + ".gh");
+					if (compressed.exists() && !compressed.isDirectory()) {
+						boolean deleteZipped = true;
+						Helper.unzip(compressed.getAbsolutePath(), GRAPH_FOLDER,
+								deleteZipped);
+					}
 
-					// MemoryGraphSafe is fast and read-thread safe but requires the entire graph in
-					// RAM which fails for large areas (but e.g. the city Berlin it is ok)
-					// MemoryGraphSafe g = new MemoryGraphSafe(GRAPH_FOLDER);
-
-					// Our new Graph implementation!
-					// Switch memory mapped and in-memory via directory. Both have a compatible file
-					// format.
-
-					// be sure you are using this for PriorityGraphStorage and its algorithms only
+					// The memory mapped graph storage is recommended and necessary for large
+					// graphs. Drawbacks: not thread safe (no problem on android) and a lot slower.
+					// But if used in combination with Contraction Hierachies it is fast (levelgraph
+					// + prepare.createAlgo)
 					Directory dir = new MMapDirectory(GRAPH_FOLDER);
+
+					// In-memory graph storage which loads from disc at start up. Drawbacks:
+					// requires lots of RAM and slow start up.
 					// Directory dir = new RAMDirectory(GRAPH_FOLDER, true);
 					GraphStorage g = new LevelGraphStorage(dir);
 					graph = g;
 					if (!g.loadExisting()) {
-						// TODO creating and populating via OSMReader is currently not possible on
-						// android
-						// g.createNew(nodeCount);
 						error = new IllegalStateException(
 								"Couldn't load graph! see deploy-maps.sh and create-graph.sh if you need one");
 						return null;
 					}
 					log("found graph with " + g.getNodes() + " nodes");
-
 					log("initial creating index ...");
 					locIndex = new Location2IDQuadtree(getGraph(), dir);
 					if (!locIndex.loadExisting())
@@ -215,10 +215,9 @@ public class MainActivity extends MapActivity {
 
 			protected void onPostExecute(Path o) {
 				if (error == null)
-					logUser("Finished loading graph & index");
+					logUser("Finished loading graph");
 				else
-					logUser("An error happend while creating graph & index:"
-							+ error.getMessage());
+					logUser("An error happend while creating graph:" + error.getMessage());
 				prepareGraphInProgress = false;
 			}
 		}.execute();
@@ -292,13 +291,13 @@ public class MainActivity extends MapActivity {
 			// }
 
 			RoutingAlgorithm createAlgo() {
-				return new PrepareContractionHierarchies().setGraph(graph)
-						.setType(FastestCalc.DEFAULT).createAlgo();
+				return new PrepareContractionHierarchies().setGraph(graph).setType(
+						FastestCarCalc.DEFAULT).createAlgo();
 			}
 
 			protected void onPostExecute(Path p) {
-				log("found path from:" + fromLat + "," + fromLon + " to " + toLat + ","
-						+ toLon + " with distance:" + p.distance() + ", nodes:"
+				log("from:" + fromLat + "," + fromLon + " to:" + toLat + "," + toLon
+						+ " found path with distance:" + p.distance() + ", nodes:"
 						+ p.nodes() + ", time:" + time + ", locFindTime:" + locFindTime);
 				logUser("the route is " + (float) p.distance() + "km long");
 

@@ -14,7 +14,8 @@ SIZE=5000000
 
 # use desktop version where logging is still contained
 GH_JAR_DIR=../graphhopper
-JAR=$GH_JAR_DIR/target/graphhopper-1.0-SNAPSHOT-jar-with-dependencies.jar
+VERSION=0.1-SNAPSHOT
+JAR=$GH_JAR_DIR/target/graphhopper-$VERSION-jar-with-dependencies.jar`
 
 if [ ! -d "$GH_JAR_DIR" ]; then
  echo "graphhopper folder not found? $GH_JAR_DIR"
@@ -24,7 +25,7 @@ fi
 
 if [ ! -f "$JAR" ]; then
   echo "## now building graphhopper jar: $JAR"
-  cd $GH_JAR_DIR && mvn -DskipTests=true assembly:assembly > /dev/null
+  cd $GH_JAR_DIR && mvn -DskipTests=true install assembly:single > /dev/null
   cd $SCRIPT_HOME
 else
   echo "## existing jar found $JAR"
