@@ -50,6 +50,23 @@ import com.graphhopper.storage.MMapDirectory;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.StopWatch;
 
+/**
+ * test graphhopper under android app
+ * eclipse->Windows->Android Virtual Device Manager->start android VM
+ * $ adb push sdcardData /sdcard/
+ * $ find ./sdcardData/
+./sdcardData/
+./sdcardData//graphhopper
+./sdcardData//graphhopper/maps
+./sdcardData//graphhopper/maps/berlin
+./sdcardData//graphhopper/maps/berlin/edges
+./sdcardData//graphhopper/maps/berlin/loc2idIndex
+./sdcardData//graphhopper/maps/berlin/nodes
+./sdcardData//graphhopper/maps/berlin.map
+
+$JAVA_HOME/bin/java $JAVA_OPTS_IMPORT -cp $JAR com.graphhopper.reader.OSMReader osmreader.levelgraph=true osmreader.osm=$OSM size=$SIZE osmreader.dataaccess=mmap
+ *
+ */
 public class MainActivity extends MapActivity {
 
 	private MapView mapView;

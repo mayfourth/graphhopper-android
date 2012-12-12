@@ -15,7 +15,7 @@ SIZE=5000000
 # use desktop version where logging is still contained
 GH_JAR_DIR=../graphhopper
 VERSION=0.1-SNAPSHOT
-JAR=$GH_JAR_DIR/target/graphhopper-$VERSION-jar-with-dependencies.jar`
+JAR=$GH_JAR_DIR/target/graphhopper-$VERSION-jar-with-dependencies.jar
 
 if [ ! -d "$GH_JAR_DIR" ]; then
  echo "graphhopper folder not found? $GH_JAR_DIR"
@@ -34,7 +34,7 @@ fi
 #if [ ! -d "$GRAPH" ]; then
   echo "## now creating graph $GRAPH from $OSM,  java opts=$JAVA_OPTS_IMPORT"
   echo "## HINT: put the osm on an external usb drive which should speed up import time"
-  $JAVA_HOME/bin/java $JAVA_OPTS_IMPORT -cp $JAR com.graphhopper.reader.OSMReader graph=$GRAPH osm=$OSM size=$SIZE dataaccess=mmap
+  $JAVA_HOME/bin/java $JAVA_OPTS_IMPORT -cp $JAR com.graphhopper.reader.OSMReader osmreader.levelgraph=true osmreader.osm=$OSM size=$SIZE osmreader.dataaccess=mmap
 #else
 #  echo "## graph already exists at $GRAPH"
 #fi
